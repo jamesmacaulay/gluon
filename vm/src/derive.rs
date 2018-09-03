@@ -1,5 +1,5 @@
 use base::ast::{
-    Alternative, Argument, AstType, Expr, ExprField, Lambda, Literal, Pattern, PatternField,
+    Alternative, Argument, Array, AstType, Expr, ExprField, Lambda, Literal, Pattern, PatternField,
     SpannedExpr, SpannedPattern, TypeBinding, TypedIdent, ValueBinding,
 };
 use base::metadata::Attribute;
@@ -203,6 +203,16 @@ fn infix(
             rhs: rhs.into(),
             implicit_args: Vec::new(),
         },
+    )
+}
+
+fn array(span: Span<BytePos>, items: Vec<SpannedExpr<Symbol>>) -> SpannedExpr<Symbol> {
+    pos::spanned(
+        span,
+        Expr::Array(Array {
+            typ: Type::hole(),
+            exprs: items,
+        }),
     )
 }
 
@@ -854,30 +864,71 @@ fn generate_serialize(
                         .collect();
 
                     let expr = {
-                        if pattern_args.len() > 1 {
-                            return Err(format!(
-                                "Variants with more than 1 argument is not yet supported"
-                            ).into());
-                        }
-
+                        // nullary variant constructors are serialized as just the name of the tag as a string
                         if pattern_args.is_empty() {
                             app(
                                 span,
                                 serialize_fn.name.clone(),
-                                vec![pos::spanned(
+                                vec![literal(span, variant.name.declared_name())],
+                            )
+                        // wrap multiple constructor arguments in an array
+                        } else if pattern_args.len() > 1 {
+                            let serialized_args: Vec<_> = (&pattern_args)
+                                .into_iter()
+                                .map(|arg| {
+                                    app(
+                                        span,
+                                        serialize_fn.name.clone(),
+                                        vec![ident(span, arg.name.clone())],
+                                    )
+                                })
+                                .collect();
+                            infix(
+                                span,
+                                app(
                                     span,
-                                    Expr::Tuple {
-                                        elems: vec![],
-                                        typ: Type::hole(),
-                                    },
-                                )],
+                                    symbols.symbol("sequence"),
+                                    vec![array(span, serialized_args)],
+                                ),
+                                symbols.symbol(">>="),
+                                pos::spanned(
+                                    span,
+                                    Expr::Lambda(Lambda {
+                                        args: vec![Argument::explicit(pos::spanned(
+                                            span,
+                                            TypedIdent::new(symbols.symbol("arr")),
+                                        ))],
+                                        body: Box::new(app(
+                                            span,
+                                            serialize_fn.name.clone(),
+                                            vec![app(
+                                                span,
+                                                symbols.symbol("singleton"),
+                                                vec![
+                                                    literal(span, variant.name.declared_name()),
+                                                    ident(span, symbols.symbol("arr")),
+                                                ],
+                                            )],
+                                        )),
+                                        id: TypedIdent::new(
+                                            symbols.symbol("serialize_variant_args_in_map"),
+                                        ),
+                                    }),
+                                ),
                             )
                         } else {
                             let arg = &pattern_args[0];
                             app(
                                 span,
                                 serialize_fn.name.clone(),
-                                vec![ident(span, arg.name.clone())],
+                                vec![app(
+                                    span,
+                                    symbols.symbol("singleton"),
+                                    vec![
+                                        literal(span, variant.name.declared_name()),
+                                        ident(span, arg.name.clone()),
+                                    ],
+                                )],
                             )
                         }
                     };
@@ -916,6 +967,9 @@ fn generate_serialize(
     );
     let functor_import = generate_import(span, symbols, &[], &["map"], "std.functor");
     let applicative_import = generate_import(span, symbols, &[], &["<*>"], "std.applicative");
+    let monad_import = generate_import(span, symbols, &[], &[">>="], "std.monad");
+    let traversable_import = generate_import(span, symbols, &[], &["sequence"], "std.traversable");
+    let array_import = generate_import(span, symbols, &[], &[], "std.array");
     let map_import = generate_import_(span, symbols, &[], &["singleton", "empty"], true, "std.map");
     let semigroup_import = generate_import(span, symbols, &[], &["<>"], "std.semigroup");
 
@@ -941,6 +995,9 @@ fn generate_serialize(
         serialization_import,
         functor_import,
         applicative_import,
+        monad_import,
+        traversable_import,
+        array_import,
         map_import,
         semigroup_import,
         serializer_binding,

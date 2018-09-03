@@ -16,7 +16,7 @@ type Record = { x : Int }
 type Record2 = { x : Int, y : String }
 
 #[derive(Show, Eq, Serialize)]
-type Variant = | MyInt Int | MyString String
+type Variant = | MyInt Int | MyString String | MyBoth Int String
 
 #[derive(Show, Eq, Serialize)]
 type MyOption a = | MyNone | MySome a
@@ -29,16 +29,26 @@ group "json.ser" [
         assert_eq (ser.to_string { x = 1, y = "abc" }) (Ok r#"{"x":1,"y":"abc"}"#),
 
     test "variant_int" <| \_ ->
-        assert_eq (ser.to_string (MyInt 123)) (Ok r#"123"#),
+        assert_eq (ser.to_string (MyInt 123)) (Ok r#"{"MyInt":123}"#),
 
     test "variant_string" <| \_ ->
-        assert_eq (ser.to_string (MyString "abc")) (Ok r#""abc""#),
+        assert_eq (ser.to_string (MyString "abc")) (Ok r#"{"MyString":"abc"}"#),
+
+    test "variant_with_two_args" <| \_ ->
+        assert_eq (ser.to_string (MyBoth 123 "abc")) (Ok r#"{"MyBoth":[123,"abc"]}"#),
 
     test "option_some" <| \_ ->
-        assert_eq (ser.to_string (MySome "abc")) (Ok r#""abc""#),
+        assert_eq (ser.to_string (Some "abc")) (Ok r#""abc""#),
 
     test "option_none" <| \_ ->
-        let x: MyOption String = MyNone
+        let x: Option String = None
         assert_eq (ser.to_string x) (Ok r#"null"#),
+
+    test "custom_option_some" <| \_ ->
+        assert_eq (ser.to_string (MySome "abc")) (Ok r#"{"MySome":"abc"}"#),
+
+    test "custom_option_none" <| \_ ->
+        let x: MyOption String = MyNone
+        assert_eq (ser.to_string x) (Ok r#""MyNone""#),
 ]
 
